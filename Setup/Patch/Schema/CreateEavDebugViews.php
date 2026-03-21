@@ -17,7 +17,10 @@ declare(strict_types=1);
 namespace MageOS\EavDebugViews\Setup\Patch\Schema;
 
 use Exception;
+use Magento\Catalog\Api\Data\CategoryInterface;
+use Magento\Catalog\Api\Data\ProductInterface;
 use Magento\Framework\DB\Adapter\AdapterInterface;
+use Magento\Framework\EntityManager\MetadataPool;
 use Magento\Framework\Setup\Patch\SchemaPatchInterface;
 use Magento\Framework\Setup\SchemaSetupInterface;
 use Psr\Log\LoggerInterface;
@@ -27,10 +30,12 @@ class CreateEavDebugViews implements SchemaPatchInterface
     /**
      * @param SchemaSetupInterface $schemaSetup
      * @param LoggerInterface $logger
+     * @param MetadataPool $metadataPool
      */
     public function __construct(
         private SchemaSetupInterface $schemaSetup,
-        private LoggerInterface $logger
+        private LoggerInterface $logger,
+        private MetadataPool $metadataPool
     ) {
     }
 
@@ -90,6 +95,38 @@ class CreateEavDebugViews implements SchemaPatchInterface
     }
 
     /**
+     * Get link field for product entity
+     *
+     * @return string
+     */
+    private function getProductLinkField(): string
+    {
+        try {
+            return $this->metadataPool
+                ->getMetadata(ProductInterface::class)
+                ->getLinkField();
+        } catch (Exception $e) {
+            return 'entity_id';
+        }
+    }
+
+    /**
+     * Get link field for category entity
+     *
+     * @return string
+     */
+    private function getCategoryLinkField(): string
+    {
+        try {
+            return $this->metadataPool
+                ->getMetadata(CategoryInterface::class)
+                ->getLinkField();
+        } catch (Exception $e) {
+            return 'entity_id';
+        }
+    }
+
+    /**
      * Create dev_product view
      *
      * @param AdapterInterface $connection
@@ -97,6 +134,8 @@ class CreateEavDebugViews implements SchemaPatchInterface
      */
     private function createProductView($connection): void
     {
+        $linkField = $this->getProductLinkField();
+
         $productEntity = $this->schemaSetup->getTable('catalog_product_entity');
         $productDecimal = $this->schemaSetup->getTable('catalog_product_entity_decimal');
         $productDatetime = $this->schemaSetup->getTable('catalog_product_entity_datetime');
@@ -115,58 +154,58 @@ class CreateEavDebugViews implements SchemaPatchInterface
         WITH
             eav_decimal AS (
                 SELECT
-                    eavd.entity_id,
+                    eavd.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavd.store_id > 0, CONCAT(ea.attribute_code, ':', eavd.store_id), ea.attribute_code),
                         eavd.value
                     ) AS attributes
                 FROM {$productDecimal} eavd
                 INNER JOIN {$eavAttribute} ea ON eavd.attribute_id = ea.attribute_id
-                GROUP BY eavd.entity_id
+                GROUP BY eavd.{$linkField}
             ),
             eav_datetime AS (
                 SELECT
-                    eavdt.entity_id,
+                    eavdt.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavdt.store_id > 0, CONCAT(ea.attribute_code, ':', eavdt.store_id), ea.attribute_code),
                         eavdt.value
                     ) AS attributes
                 FROM {$productDatetime} eavdt
                 INNER JOIN {$eavAttribute} ea ON eavdt.attribute_id = ea.attribute_id
-                GROUP BY eavdt.entity_id
+                GROUP BY eavdt.{$linkField}
             ),
             eav_int AS (
                 SELECT
-                    eavi.entity_id,
+                    eavi.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavi.store_id > 0, CONCAT(ea.attribute_code, ':', eavi.store_id), ea.attribute_code),
                         eavi.value
                     ) AS attributes
                 FROM {$productInt} eavi
                 INNER JOIN {$eavAttribute} ea ON eavi.attribute_id = ea.attribute_id
-                GROUP BY eavi.entity_id
+                GROUP BY eavi.{$linkField}
             ),
             eav_text AS (
                 SELECT
-                    eavt.entity_id,
+                    eavt.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavt.store_id > 0, CONCAT(ea.attribute_code, ':', eavt.store_id), ea.attribute_code),
                         eavt.value
                     ) AS attributes
                 FROM {$productText} eavt
                 INNER JOIN {$eavAttribute} ea ON eavt.attribute_id = ea.attribute_id
-                GROUP BY eavt.entity_id
+                GROUP BY eavt.{$linkField}
             ),
             eav_varchar AS (
                 SELECT
-                    eavv.entity_id,
+                    eavv.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavv.store_id > 0, CONCAT(ea.attribute_code, ':', eavv.store_id), ea.attribute_code),
                         eavv.value
                     ) AS attributes
                 FROM {$productVarchar} eavv
                 INNER JOIN {$eavAttribute} ea ON eavv.attribute_id = ea.attribute_id
-                GROUP BY eavv.entity_id
+                GROUP BY eavv.{$linkField}
             )
         SELECT
             e.*,
@@ -178,11 +217,11 @@ class CreateEavDebugViews implements SchemaPatchInterface
                 COALESCE(ev.attributes, JSON_OBJECT())
             ) AS eav_attributes
         FROM {$productEntity} e
-        LEFT JOIN eav_decimal ed ON e.entity_id = ed.entity_id
-        LEFT JOIN eav_datetime edt ON e.entity_id = edt.entity_id
-        LEFT JOIN eav_int ei ON e.entity_id = ei.entity_id
-        LEFT JOIN eav_text et ON e.entity_id = et.entity_id
-        LEFT JOIN eav_varchar ev ON e.entity_id = ev.entity_id
+        LEFT JOIN eav_decimal ed ON e.{$linkField} = ed.{$linkField}
+        LEFT JOIN eav_datetime edt ON e.{$linkField} = edt.{$linkField}
+        LEFT JOIN eav_int ei ON e.{$linkField} = ei.{$linkField}
+        LEFT JOIN eav_text et ON e.{$linkField} = et.{$linkField}
+        LEFT JOIN eav_varchar ev ON e.{$linkField} = ev.{$linkField}
         SQL;
 
         $connection->query($sql);
@@ -197,6 +236,8 @@ class CreateEavDebugViews implements SchemaPatchInterface
      */
     private function createCategoryView($connection): void
     {
+        $linkField = $this->getCategoryLinkField();
+
         $categoryEntity = $this->schemaSetup->getTable('catalog_category_entity');
         $categoryDecimal = $this->schemaSetup->getTable('catalog_category_entity_decimal');
         $categoryDatetime = $this->schemaSetup->getTable('catalog_category_entity_datetime');
@@ -215,58 +256,58 @@ class CreateEavDebugViews implements SchemaPatchInterface
         WITH
             eav_decimal AS (
                 SELECT
-                    eavd.entity_id,
+                    eavd.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavd.store_id > 0, CONCAT(ea.attribute_code, ':', eavd.store_id), ea.attribute_code),
                         eavd.value
                     ) AS attributes
                 FROM {$categoryDecimal} eavd
                 INNER JOIN {$eavAttribute} ea ON eavd.attribute_id = ea.attribute_id
-                GROUP BY eavd.entity_id
+                GROUP BY eavd.{$linkField}
             ),
             eav_datetime AS (
                 SELECT
-                    eavdt.entity_id,
+                    eavdt.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavdt.store_id > 0, CONCAT(ea.attribute_code, ':', eavdt.store_id), ea.attribute_code),
                         eavdt.value
                     ) AS attributes
                 FROM {$categoryDatetime} eavdt
                 INNER JOIN {$eavAttribute} ea ON eavdt.attribute_id = ea.attribute_id
-                GROUP BY eavdt.entity_id
+                GROUP BY eavdt.{$linkField}
             ),
             eav_int AS (
                 SELECT
-                    eavi.entity_id,
+                    eavi.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavi.store_id > 0, CONCAT(ea.attribute_code, ':', eavi.store_id), ea.attribute_code),
                         eavi.value
                     ) AS attributes
                 FROM {$categoryInt} eavi
                 INNER JOIN {$eavAttribute} ea ON eavi.attribute_id = ea.attribute_id
-                GROUP BY eavi.entity_id
+                GROUP BY eavi.{$linkField}
             ),
             eav_text AS (
                 SELECT
-                    eavt.entity_id,
+                    eavt.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavt.store_id > 0, CONCAT(ea.attribute_code, ':', eavt.store_id), ea.attribute_code),
                         eavt.value
                     ) AS attributes
                 FROM {$categoryText} eavt
                 INNER JOIN {$eavAttribute} ea ON eavt.attribute_id = ea.attribute_id
-                GROUP BY eavt.entity_id
+                GROUP BY eavt.{$linkField}
             ),
             eav_varchar AS (
                 SELECT
-                    eavv.entity_id,
+                    eavv.{$linkField},
                     JSON_OBJECTAGG(
                         IF(eavv.store_id > 0, CONCAT(ea.attribute_code, ':', eavv.store_id), ea.attribute_code),
                         eavv.value
                     ) AS attributes
                 FROM {$categoryVarchar} eavv
                 INNER JOIN {$eavAttribute} ea ON eavv.attribute_id = ea.attribute_id
-                GROUP BY eavv.entity_id
+                GROUP BY eavv.{$linkField}
             )
         SELECT
             e.*,
@@ -278,11 +319,11 @@ class CreateEavDebugViews implements SchemaPatchInterface
                 COALESCE(ev.attributes, JSON_OBJECT())
             ) AS eav_attributes
         FROM {$categoryEntity} e
-        LEFT JOIN eav_decimal ed ON e.entity_id = ed.entity_id
-        LEFT JOIN eav_datetime edt ON e.entity_id = edt.entity_id
-        LEFT JOIN eav_int ei ON e.entity_id = ei.entity_id
-        LEFT JOIN eav_text et ON e.entity_id = et.entity_id
-        LEFT JOIN eav_varchar ev ON e.entity_id = ev.entity_id
+        LEFT JOIN eav_decimal ed ON e.{$linkField} = ed.{$linkField}
+        LEFT JOIN eav_datetime edt ON e.{$linkField} = edt.{$linkField}
+        LEFT JOIN eav_int ei ON e.{$linkField} = ei.{$linkField}
+        LEFT JOIN eav_text et ON e.{$linkField} = et.{$linkField}
+        LEFT JOIN eav_varchar ev ON e.{$linkField} = ev.{$linkField}
         SQL;
 
         $connection->query($sql);
